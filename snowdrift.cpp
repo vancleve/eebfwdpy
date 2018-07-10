@@ -195,34 +195,32 @@ struct phenotype_sampler
     
 };
 
-PYBIND11_PLUGIN(snowdrift)
+PYBIND11_MODULE(snowdrift, m)
 {
-    pybind11::module m("snowdrift",
-                       "Example of custom stateful fitness model.");
-
-    // fwdpy11 provides a macro
-    // to make sure that the Python wrapper
-    // to fwdpy11::singlepop_fitness is visible
-    // to this module.
-    FWDPY11_SINGLE_LOCUS_FITNESS()
+  m.doc() = "Example of custom stateful fitness model.";
+    
+  // fwdpy11 provides a macro
+  // to make sure that the Python wrapper
+  // to fwdpy11::singlepop_fitness is visible
+  // to this module.
+  FWDPY11_SINGLE_LOCUS_FITNESS()
 
     // Create a Python class based on our new type
     py::class_<snowdrift, std::shared_ptr<snowdrift>,
                fwdpy11::single_locus_fitness>(m, "SlocusSnowdrift")
-        .def(py::init<const fwdpy11::GSLrng_t&, double, double, double, double, double, double>(),
-	     py::arg("rng"),
-	     py::arg("b1"), py::arg("b2"), py::arg("c1"), py::arg("c2"),
-	     py::arg("sigslope"), py::arg("pheno0"))
-        .def_readwrite("phenotypes", &snowdrift::phenotypes, "snowdrift phenotypes")
-	.def("update", &snowdrift::update, py::arg("pop"));
+    .def(py::init<const fwdpy11::GSLrng_t&, double, double, double, double, double, double>(),
+	 py::arg("rng"),
+	 py::arg("b1"), py::arg("b2"), py::arg("c1"), py::arg("c2"),
+	 py::arg("sigslope"), py::arg("pheno0"))
+    .def_readwrite("phenotypes", &snowdrift::phenotypes, "snowdrift phenotypes")
+    .def("update", &snowdrift::update, py::arg("pop"));
 
-    py::class_<phenotype_sampler>(m, "SamplerSnowdrift")
-	.def(py::init<std::size_t, const snowdrift&>(),
-	     py::arg("sample_time"), py::arg("snowdrift_fitness"))
-	.def("__call__",
-	     [](phenotype_sampler& f, const fwdpy11::singlepop_t &p) { return f(p); },
-	     py::arg("pop"))
-	.def_readwrite("samples", &phenotype_sampler::samples, "sampled phenotypes");
+  py::class_<phenotype_sampler>(m, "SamplerSnowdrift")
+    .def(py::init<std::size_t, const snowdrift&>(),
+	 py::arg("sample_time"), py::arg("snowdrift_fitness"))
+    .def("__call__",
+	 [](phenotype_sampler& f, const fwdpy11::singlepop_t &p) { return f(p); },
+	 py::arg("pop"))
+    .def_readwrite("samples", &phenotype_sampler::samples, "sampled phenotypes");
 
-    return m.ptr();
 }
