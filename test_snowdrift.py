@@ -13,37 +13,22 @@ import fwdpy11.wright_fisher
 import fwdpy11.model_params
 import matplotlib.pyplot as plt
 
-# class phenotype_sampler(object):
-#     """
-#     Temporal sampler checks that one can hook
-#     a stateful fitness model to a sampler
-#     and access its data and that the data
-#     are as expected.
-#     """
-#     def __init__(self, step, f):
-#         self.step = step
-#         self.f = f
-#         self.samples = list()
 
-#     def __call__(self, pop):
-#         if pop.generation % self.step == 0:
-#             self.samples.append(self.f.phenotypes)
-
-
-def evolve_snowdrift_dist(ngens, N, x0, mu, sig, slope, b1, b2, c1, c2, step=1, seed=42):
+def evolve_snowdrift_dist(ngens, N, x0, mu, sig, slope, b1, b2, c1, c2,
+                          step=1, seed=42):
     pop = fp11.SlocusPop(N)
 
     # Initialize a random number generator
     rng = fp11.GSLrng(seed)
 
-    nsteps = int(ngens / step)
     # nlist = np.array([N]*step,dtype=np.uint32)
     nlist = np.array([N]*ngens, dtype=np.uint32)
 
     p = {'sregions': [fp11.GaussianS(0, 1, 1, sig, 1.0)],
          'recregions': [fp11.Region(0, 1, 1)],
          'nregions': [],
-         'gvalue': (snowdrift.SlocusSnowdrift, (rng, b1, b2, c1, c2, slope, x0)),
+         'gvalue': (snowdrift.SlocusSnowdrift,
+                    (rng, b1, b2, c1, c2, slope, x0)),
          'demography': nlist,
          'rates': (0.0, mu, 0.0),
          'prune_selected': False}
@@ -51,22 +36,14 @@ def evolve_snowdrift_dist(ngens, N, x0, mu, sig, slope, b1, b2, c1, c2, step=1, 
     params = fp11.model_params.ModelParams(**p)
 
     snowdrift_sampler = snowdrift.SamplerSnowdrift(step)
-    # snowdrift_sampler = phenotype_sampler(step, snowdrift_fitness)
 
     fp11.wright_fisher.evolve(rng, pop, params, snowdrift_sampler)
 
-    # phenos = list()
-    # for step in range(nsteps):
-    #     fp11.wright_fisher.evolve(rng, pop, params)
-
-    #     # must append as 'list' otherwise weird buffer problem
-    #     phenos.append(list(snowdrift_sampler.phenotypes))
-
     return pop, snowdrift_sampler
-    # return pop, phenos, snowdrift_sampler
 
 
-def plotEvolveDist(vals, bins=100, interpolation=None, vmin=None, vmax=None, tmult=1, phenorange=[0, 1]):
+def plotEvolveDist(vals, bins=100, interpolation=None, vmin=None, vmax=None,
+                   tmult=1, phenorange=[0, 1]):
     parr = np.array(vals)
     nruns = parr.shape[0]
 
