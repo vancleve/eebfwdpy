@@ -21,7 +21,6 @@
 import fwdpy11 as fp11 
 #add fwdpy11 header locations to the include path
 cfg['include_dirs'] = [ fp11.get_includes(), fp11.get_fwdpp_includes() ]
-setup_pybind11(cfg)  
 #On OS X using clang, there is more work to do.  Using gcc on OS X
 #gets rid of these requirements. The specifics sadly depend on how
 #you initially built fwdpy11, and what is below assumes you used
@@ -30,65 +29,31 @@ setup_pybind11(cfg)
 #cfg['linker_args']=['-stdlib=libc++','-mmacosx-version-min=10.7']
 #An alternative to the above is to add the first line to CPPFLAGS
 #and the second to LDFLAGS when compiling a plugin on OS X using clang.
+setup_pybind11(cfg)
 %>
 // clang-format on
 
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
-#include <fwdpy11/types.hpp>
-#include <fwdpy11/fitness/fitness.hpp>
+
+#include <fwdpy11/types/SlocusPop.hpp>
+#include <fwdpp/fitness_models.hpp>
+#include <fwdpy11/genetic_values/SlocusPopGeneticValue.hpp>
+
 #include <gsl/gsl_rng.h>
       
 namespace py = pybind11;
 
-struct snowdrift_diploid
-/* This is a function object implementing the snowdrift
- * fitness calculation
- */
-{
-    using result_type = double;
-    inline result_type
-    operator()(const fwdpy11::GSLrng_t& rng,
-	       const fwdpy11::diploid_t &dip, const fwdpy11::gcont_t &gametes,
-               const fwdpy11::mcont_t &mutations,
-               const std::vector<double> &phenotypes, const double b1,
-               const double b2, const double c1, const double c2) const
-    /* The first 3 arguments will be passed in from fwdpp.
-     * The phenotypes are the stateful part, and will get
-     * passed in by reference.  The remaining params
-     * define the payoff function and are also supplied externally.
-     */
-    {
-        auto N = phenotypes.size();
-        // A diploid tracks its index via
-        // fwdpy11::diploid_t::label, which
-        // is std::size_t.
-        auto i = dip.label;
-        double zself = phenotypes[i];
-
-	result_type fitness = 0;
-	// get random partner k
-	std::size_t k = gsl_rng_uniform_int(rng.get(), N-1);
-	if (k >= i) {
-	    ++k;
-	}	
-	double zpair = zself + phenotypes[k];
-
-	// Payoff function from Fig 1 of Doebeli, Hauert & Killingback (2004, Science)
-	fitness += 1 + b1 * zpair + b2 * zpair * zpair
-	    - c1 * zself - c2 * zself * zself;
-
-       	return std::max(fitness, 0.0);
-    }
-};
-
-struct snowdrift : public fwdpy11::single_locus_fitness
+struct snowdrift : public fwdpy11::SlocusPopGeneticValue
 /* This is our stateful fitness object.
  * It records the model parameters and holds a
  * vector to track individual phenotypes.
  *
- * The C++ side of an SlocusFitness object must publicly
- * inherit from fwdpy11::single_locus_fitness.
+ * Here, we publicly inherit from fwdpy11::SlocusPopGeneticValue,
+ * which is defined in the header included above.  It is
+ * an abstract class in C++ terms, and is reflected
+ * as a Python Abstract Base Class (ABC) called
+ * fwdpy11.genetic_values.SlocusPopGeneticValue.
  *
  * The phenotypes get updated each generation during
  * the simulation.
@@ -98,98 +63,101 @@ struct snowdrift : public fwdpy11::single_locus_fitness
  */
 {
     const fwdpy11::GSLrng_t& rng;
-    double b1, b2, c1, c2;
-    double sigslope;
-    double pheno0;
+    const double b1, b2, c1, c2;
+    const double sigslope, pheno0;
     std::vector<double> phenotypes;
-
+	
     snowdrift(const fwdpy11::GSLrng_t& rng_,
 	      double b1_, double b2_, double c1_, double c2_,
 	      double sigslope_, double pheno0_)
-        : rng(rng_), b1(b1_), b2(b2_), c1(c1_), c2(c2_),
-	  sigslope(sigslope_), pheno0(pheno0_), phenotypes(std::vector<double>())
+        : fwdpy11::SlocusPopGeneticValue{}, rng(rng_),
+	  b1(b1_), b2(b2_), c1(c1_), c2(c2_),
+	  sigslope(sigslope_), pheno0(pheno0_), phenotypes()
     {
     }
 
-    inline fwdpy11::single_locus_fitness_fxn
-    callback() const final
-    // A stateful fitness model must return a bound callable.
+    inline double
+    operator()(const std::size_t diploid_index,
+               const fwdpy11::SlocusPop & /*pop*/) const
+    // The call operator must return the genetic value of an individual
     {
-        /* Please remember that std::bind will pass a copy unless you
-         * explicity wrap with a reference wrapper.  Here,
-         * we use std::cref to make sure that phenotypes are
-         * passed as const reference.
-         */
-        return std::bind(snowdrift_diploid(), std::cref(rng),
-			 std::placeholders::_1,
-			 std::placeholders::_2,
-			 std::placeholders::_3,
-                         std::cref(phenotypes), b1, b2, c1, c2);
+        return phenotypes[diploid_index];
     }
-    void
-    update(const fwdpy11::singlepop_t &pop) final
-    /* A stateful fitness model needs updating.
-     * The base class defines this virtual function
-     * to do nothing (for non-stateful models).
-     * Here, we redefine it as needed.
-     */
+
+    inline double
+    genetic_value_to_fitness(const fwdpy11::DiploidMetadata &metadata) const
+    // This function converts genetic value to fitness.
     {
-	using __mtype = typename fwdpy11::mcont_t::value_type;
+        double fitness = 0.0;
+        double zself = metadata.g;
+        auto N = phenotypes.size();
+
+	// get random partner k
+	std::size_t k = gsl_rng_uniform_int(rng.get(), N-1);
+	if (k >= metadata.label)
+	    {
+		++k;
+	    }
+
+	double zpair = zself + phenotypes[k];
+	// Payoff function from Fig 1 of Doebeli, Hauert & Killingback (2004, Science)
+	fitness += 1 + b1 * zpair + b2 * zpair * zpair
+	    - c1 * zself - c2 * zself * zself;
+
+       	return std::max(fitness, 0.0);
+    }
+
+    inline double
+    noise(const fwdpy11::GSLrng_t & /*rng*/,
+          const fwdpy11::DiploidMetadata & /*offspring_metadata*/,
+          const std::size_t /*parent1*/, const std::size_t /*parent2*/,
+          const fwdpy11::SlocusPop & /*pop*/) const
+    // This function may be used to model random effects...
+    {
+        //...but there are no random effects here.
+        return 0.0;
+    }
+
+    inline void
+    update(const fwdpy11::SlocusPop &pop)
+    // A stateful fitness model needs updating.
+    {
 	double summut;
 	double sig0;
-	
+
         phenotypes.resize(pop.N);
-        for (auto &&dip : pop.diploids)
+        for (std::size_t i = 0; i < pop.N; ++i)
             {
-		// sum of mutant effects
-		summut =
-		    KTfwd::site_dependent_fitness()(
-			pop.gametes[dip.first],
-			pop.gametes[dip.second],
-			pop.mutations,
-			[&](double &fitness, const __mtype &mut) {
-			    fitness += (2.0 * mut.s);
-			},
-			[&](double &fitness, const __mtype &mut) {
-			    fitness += (mut.h * mut.s);
-			},
-			0.);
                 // A diploid tracks its index via
-                // fwdpy11::diploid_t::label
-
-		// map mutant effects to unit interval with sigmoidal function
+                // fwdpy11::DiploidMetadata::label
+		summut = fwdpp::additive_diploid(2.0)(pop.diploids[i],
+						      pop.gametes, pop.mutations) - 1.0;
 		sig0 = 1.0 / sigslope * std::log(pheno0 / (1 - pheno0));
-		phenotypes[dip.label] = 1.0 / (1.0 + std::exp( - sigslope * (summut + sig0)));
+		phenotypes[pop.diploid_metadata[i].label]
+		    = 1.0 / (1.0 + std::exp( - sigslope * (summut + sig0)));
             }
-    };
-
-    // A custom fitness function requires that
-    // several pure virtual functions be defined.
-    // These macros do it for you:
-    SINGLE_LOCUS_FITNESS_CLONE_SHARED(snowdrift);
-    SINGLE_LOCUS_FITNESS_CLONE_UNIQUE(snowdrift);
-    // This one gets pass the C++ name of the
-    // callback.  We use C++11's typid to
-    // do that for us:
-    SINGLE_LOCUS_FITNESS_CALLBACK_NAME(typeid(snowdrift_diploid).name());
+    }
 };
 
 struct phenotype_sampler
 {
     std::size_t sample_time;
-    std::vector< std::vector<double> > samples;
-    const snowdrift &sd_fitness;
+    std::vector< std::vector<double> > phenotypes;
     
-    phenotype_sampler(std::size_t sample_time_,
-		      const snowdrift &sd_fitness_) : sample_time(sample_time_), samples(0), sd_fitness(sd_fitness_)
+    phenotype_sampler(std::size_t sample_time_) : sample_time(sample_time_), phenotypes(0)
 	{
 	}
 
-    void operator()(const fwdpy11::singlepop_t &pop)
+    void operator()(const fwdpy11::SlocusPop &pop)
     {
 	if (pop.generation % sample_time == 0)
 	    {
-		samples.push_back(sd_fitness.phenotypes);
+		std::vector<double> new_samples(pop.N);
+		for (std::size_t i = 0; i < pop.N; ++i)
+		    {
+			new_samples[i] = pop.diploid_metadata[i].g;
+		    }
+		phenotypes.push_back(new_samples);
 	    }
     }
     
@@ -197,30 +165,29 @@ struct phenotype_sampler
 
 PYBIND11_MODULE(snowdrift, m)
 {
-  m.doc() = "Example of custom stateful fitness model.";
+  m.doc() = "Snowdrift cooperation model.";
     
-  // fwdpy11 provides a macro
-  // to make sure that the Python wrapper
-  // to fwdpy11::singlepop_fitness is visible
-  // to this module.
-  FWDPY11_SINGLE_LOCUS_FITNESS()
 
-    // Create a Python class based on our new type
-    py::class_<snowdrift, std::shared_ptr<snowdrift>,
-               fwdpy11::single_locus_fitness>(m, "SlocusSnowdrift")
+  // We need to import the Python version of our base class:
+  pybind11::object imported_snowdrift_base_class_type
+    = pybind11::module::import("fwdpy11.genetic_values")
+    .attr("SlocusPopGeneticValue");
+  
+  // Create a Python class based on our new type
+  py::class_<snowdrift, fwdpy11::SlocusPopGeneticValue>(m, "SlocusSnowdrift")
     .def(py::init<const fwdpy11::GSLrng_t&, double, double, double, double, double, double>(),
 	 py::arg("rng"),
 	 py::arg("b1"), py::arg("b2"), py::arg("c1"), py::arg("c2"),
 	 py::arg("sigslope"), py::arg("pheno0"))
     .def_readwrite("phenotypes", &snowdrift::phenotypes, "snowdrift phenotypes")
     .def("update", &snowdrift::update, py::arg("pop"));
-
+  
   py::class_<phenotype_sampler>(m, "SamplerSnowdrift")
-    .def(py::init<std::size_t, const snowdrift&>(),
-	 py::arg("sample_time"), py::arg("snowdrift_fitness"))
+    .def(py::init<std::size_t>(),
+	 py::arg("sample_time"))
     .def("__call__",
-	 [](phenotype_sampler& f, const fwdpy11::singlepop_t &p) { return f(p); },
+	 [](phenotype_sampler& f, const fwdpy11::SlocusPop &p) { return f(p); },
 	 py::arg("pop"))
-    .def_readwrite("samples", &phenotype_sampler::samples, "sampled phenotypes");
+    .def_readwrite("phenotypes", &phenotype_sampler::phenotypes, "sampled phenotypes");
 
 }
