@@ -33,8 +33,6 @@ def evolve(rng, pop, params, recorder=None):
         then :class:`fwdpy11.temporal_samplers.RecordNothing` will be used.
 
     """
-    import fwdpy11.SlocusPop
-    import fwdpy11.MlocusPop
     import warnings
     # Test parameters while suppressing warnings
     with warnings.catch_warnings():
@@ -43,31 +41,15 @@ def evolve(rng, pop, params, recorder=None):
         params.validate()
 
     from .internal import makeMutationRegions, makeRecombinationRegions
-    if pop.__class__ is fwdpy11.SlocusPop:
-        from .wright_fisher_slocus import WFSlocusPop
-        pneutral = params.mutrate_n/(params.mutrate_n+params.mutrate_s)
-        mm = makeMutationRegions(rng, pop, params.nregions,
-                                 params.sregions, pneutral)
-        rm = makeRecombinationRegions(rng, params.recrate, params.recregions)
+    from .wright_fisher_slocus_metapop import WFSlocusMetapop
+    pneutral = params.mutrate_n/(params.mutrate_n+params.mutrate_s)
+    mm = makeMutationRegions(rng, pop, params.nregions,
+                             params.sregions, pneutral)
+    rm = makeRecombinationRegions(rng, params.recrate, params.recregions)
 
-        if recorder is None:
-            from fwdpy11.temporal_samplers import RecordNothing
-            recorder = RecordNothing()
+    if recorder is None:
+        from fwdpy11.temporal_samplers import RecordNothing
+        recorder = RecordNothing()
 
-        WFSlocusPop(rng, pop, params.demography, params.mutrate_n, params.mutrate_s,
+    WFSlocusMetapop(rng, pop, params.demography[0], params.demography[1], params.mutrate_n, params.mutrate_s,
                     params.recrate, mm, rm, params.make_gvalue(), recorder, params.pself, params.prune_selected)
-    else:
-        from .wright_fisher_mlocus import WFMlocusPop
-        mm = [makeMutationRegions(rng, pop, i, j, n/(n+s)) for
-              i, j, n, s in zip(params.nregions,
-                                params.sregions,
-                                params.mutrates_n, params.mutrates_s)]
-        rm = [makeRecombinationRegions(rng, i, j) for i, j in zip(
-            params.recrates, params.recregions)]
-
-        if recorder is None:
-            from fwdpy11.temporal_samplers import RecordNothing
-            recorder = RecordNothing()
-
-        WFMlocusPop(rng, pop, params.demography, params.mutrates_n, params.mutrates_s, mm, rm, params.interlocus_rec,
-                    params.make_gvalue(), recorder, params.pself, params.prune_selected)

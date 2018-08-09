@@ -26,22 +26,23 @@
 #include <tuple>
 #include <queue>
 #include <cmath>
+#include <string>
 #include <stdexcept>
 #include <fwdpp/diploid.hh>
 #include <fwdpp/sugar/GSLrng_t.hpp>
 #include <fwdpp/extensions/regions.hpp>
 #include <fwdpy11/rng.hpp>
-#include <fwdpy11/types/SlocusPop.hpp>
 #include <fwdpy11/samplers.hpp>
 #include <fwdpy11/sim_functions.hpp>
 #include <fwdpy11/genetic_values/SlocusPopGeneticValue.hpp>
 #include <fwdpy11/genetic_values/GeneticValueToFitness.hpp>
-#include <fwdpy11/evolve/SlocusPop_generation.hpp>
+#include "SlocusMetapop.hpp"
+#include "SlocusMetapop_generation.hpp"
 
 namespace py = pybind11;
 
-fwdpp::fwdpp_internal::gsl_ran_discrete_t_ptr
-calculate_fitness(const fwdpy11::GSLrng_t &rng, fwdpy11::SlocusPop &pop,
+std::vector<double>
+calculate_fitness(const fwdpy11::GSLrng_t &rng, eebfwdpy::SlocusMetapop &pop,
                   const fwdpy11::SlocusPopGeneticValue &genetic_value_fxn)
 {
     // Calculate parental fitnesses
@@ -70,21 +71,79 @@ calculate_fitness(const fwdpy11::GSLrng_t &rng, fwdpy11::SlocusPop &pop,
             throw std::runtime_error("non-finite fitnesses encountered");
         }
 
-    auto rv = fwdpp::fwdpp_internal::gsl_ran_discrete_t_ptr(
-        gsl_ran_discrete_preproc(parental_fitnesses.size(),
-                                 parental_fitnesses.data()));
-    if (rv == nullptr)
+    return parental_fitnesses;
+}
+
+// For the moment being, this function will implement a group competition demography
+// so that local competition is minimized (sensu Lehmann & Rousset 2010 PTRS)
+//
+// TODO: generalize for more kinds of demography
+//
+std::vector<fwdpp::fwdpp_internal::gsl_ran_discrete_t_ptr>
+calculate_parent_sampling(const fwdpy11::GSLrng_t &rng,
+			  eebfwdpy::SlocusMetapop &pop,
+			  const std::vector<double> parental_fitnesses,
+			  const py::array_t<std::size_t> metapopsizes,
+                          const py::array_t<double> migrate)
+{
+    auto Ns_next = metapopsizes.at(pop.generation+1);
+    auto nd_next = Ns_next.size();
+    std::vector<double> deme_fitnesses(pop.nd);
+    
+    for (std::size_t i = 0; d < pop.N; ++i)
         {
-            // This is due to negative fitnesses
-            throw std::runtime_error(
-                "fitness lookup table could not be generated");
+            deme_fitnesses[pop.deme_map[i]] += pop.diploid_metadata[i].w;
         }
-    return rv;
+    
+    auto deme_lookup = fwdpp::fwdpp_internal::gsl_ran_discrete_t_ptr(
+        gsl_ran_discrete_preproc(deme_fitnesses.size(), deme_fitnesses.data()));
+
+
+    // set parent demes according to deme fitnesses
+    std::vector<std::size_t> deme_parents(nd_next);
+    for (auto&& p : deme_parents)
+        {
+            p = gsl_ran_discrete(rng.get(), deme_lookup.get());
+        }
+
+    
+    std::vector<fwdpp::fwdpp_internal::gsl_ran_discrete_t_ptr> lookups(nd_next);
+    std::vector<double> post_migration(pop.N);
+
+    // src and dest are in reference to migration after group competition
+    for (std::size_t d_dest = 0; d_dest < nd_next; ++d_dest)
+        {
+            for (std::size_t i = 0; i < pop.N; ++i)
+                {
+                    post_migration[i] = 0;
+                    for (std::size_t d_src = 0; d_src < nd_next; ++j)
+                        {
+                            post_migration[i] +=
+                            (deme_parents[d_src] == pop.deme_map[i]) * Ns_next.at(d_src)
+                                * parental_fitnesses[i] / deme_fitnesses[pop.deme_map[i]]
+                                * migrate.at(d_dest, d_src);
+                        }
+                }
+            
+            auto rv = fwdpp::fwdpp_internal::gsl_ran_discrete_t_ptr(
+                gsl_ran_discrete_preproc(post_migration.size(),
+                                         post_migration.data()));
+            if (rv == nullptr)
+                {
+                    // This is due to negative fitnesses
+                    throw std::runtime_error(
+                        "fitness lookup table for deme "
+                        + std::to_string(d_dest) + " could not be generated");
+                }
+            lookups[d_dest] = rv;
+        }
+    
+    return lookups;
 }
 
 void
 handle_fixations(const bool remove_selected_fixations,
-                 const std::uint32_t N_next, fwdpy11::SlocusPop &pop)
+                 const std::uint32_t N_next, eebfwdpy::SlocusMetapop &pop)
 {
     if (remove_selected_fixations)
         {
@@ -104,11 +163,11 @@ handle_fixations(const bool remove_selected_fixations,
 }
 
 void
-wfSlocusPop(
-    const fwdpy11::GSLrng_t &rng, fwdpy11::SlocusPop &pop,
-    py::array_t<std::uint32_t> popsizes, const double mu_neutral,
-    const double mu_selected, const double recrate,
-    const fwdpp::extensions::discrete_mut_model<fwdpy11::SlocusPop::mcont_t>
+wfSlocusMetapop(
+    const fwdpy11::GSLrng_t &rng, eebfwdpy::SlocusMetapop &pop,
+    py::array_t<std::size_t> metapopsizes, py::array_t<double> migrate, 
+    const double mu_neutral, const double mu_selected, const double recrate,
+    const fwdpp::extensions::discrete_mut_model<eebfwdpy::SlocusMetapop::mcont_t>
         &mmodel,
     const fwdpp::extensions::discrete_rec_model &rmodel,
     fwdpy11::SlocusPopGeneticValue &genetic_value_fxn,
@@ -135,18 +194,27 @@ wfSlocusPop(
             throw std::invalid_argument(
                 "selected mutation rate must be non-negative");
         }
-    const std::uint32_t num_generations
-        = static_cast<std::uint32_t>(popsizes.size());
-    if (!num_generations)
-        {
-            throw std::invalid_argument("empty list of population sizes");
-        }
+    if (metapopsizes.ndim() != 2 || metapopsizes.shape()[0] == 1 || metapopsizes.shape()[1] == 1)
+      {
+	throw std::invalid_argument("metapopsizes must be 2D array for deme sizes for each generation");
+      }
+    if (migrate.ndim() != 2 || migrate.shape()[0] != migrate.shape()[1])
+      {
+	throw std::invalid_argument("migration rate matrix must be square 2D array");
+      }
+    if (metapopsizes.shape()[1] != migrate.shape()[0])
+      {
+	throw std::invalid_argument("number of demes must match migration matrix size");
+      }
+
+    const std::uint32_t num_generations = static_cast<std::uint32_t>(metapopsizes.shape()[0]);
 
     // E[S_{2N}] I got the expression from Ewens.
+    // JVC: this is probably very conservative for a metapop
     pop.mutations.reserve(std::ceil(
         std::log(2 * pop.N)
-        * (4. * double(pop.N) * (mu_neutral + mu_selected)
-           + 0.667 * (4. * double(pop.N) * (mu_neutral + mu_selected)))));
+        * (4. * double(pop.N) * (mu_neutral + mu_selected))
+           + 0.667 * (4. * double(pop.N) * (mu_neutral + mu_selected))));
 
     const auto bound_mmodel = fwdpp::extensions::bind_dmm(rng.get(), mmodel);
     const auto bound_rmodel = [&rng, &rmodel]() { return rmodel(rng.get()); };
@@ -155,7 +223,10 @@ wfSlocusPop(
     // so we must call update(...) prior to calculating fitness,
     // else bad stuff like segfaults could happen.
     genetic_value_fxn.update(pop);
-    auto lookup = calculate_fitness(rng, pop, genetic_value_fxn);
+    auto parental_fitnesses = calculate_fitness(rng, pop, genetic_value_fxn);
+    auto lookups = calculate_parent_sampling(rng, pop,
+                                             parental_fitnesses,
+                                             metapopsizes, migrate);
 
     // Generate our fxns for picking parents
 
@@ -189,14 +260,16 @@ wfSlocusPop(
     for (std::uint32_t gen = 0; gen < num_generations; ++gen)
         {
             ++pop.generation;
-            const auto N_next = popsizes.at(gen);
+            const auto N_next = metapopsizes.at(gen);
+	    // update deme sizes and deme_map to offspring generation
+	    pop.update_deme_sizes(N_next); 
+        
             fwdpy11::evolve_generation(
                 rng, pop, N_next, mu_neutral + mu_selected, bound_mmodel,
                 bound_rmodel, pick_first_parent, pick_second_parent,
                 generate_offspring_metadata);
             handle_fixations(remove_selected_fixations, N_next, pop);
 
-            pop.N = N_next;
             // TODO: deal with random effects
             genetic_value_fxn.update(pop);
             lookup = calculate_fitness(rng, pop, genetic_value_fxn);
@@ -204,9 +277,9 @@ wfSlocusPop(
         }
 }
 
-PYBIND11_MODULE(wright_fisher_slocus, m)
+PYBIND11_MODULE(wright_fisher_slocus_metapop, m)
 {
     m.doc() = "Evolution under a Wright-Fisher model.";
 
-    m.def("WFSlocusPop", &wfSlocusPop);
+    m.def("WFSlocusMetapop", &wfSlocusMetapop);
 }

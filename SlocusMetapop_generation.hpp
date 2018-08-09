@@ -25,9 +25,9 @@
 #include <fwdpp/insertion_policies.hpp>
 #include <fwdpp/mutate_recombine.hpp>
 #include <fwdpy11/rng.hpp>
-#include <fwdpy11/types/SlocusPop.hpp>
 #include <fwdpy11/genetic_values/SlocusPopGeneticValue.hpp>
 #include <gsl/gsl_randist.h>
+#include "SlocusMetapop.hpp"
 
 namespace eebfwdpy
 {
@@ -36,7 +36,7 @@ namespace eebfwdpy
               typename mutation_model, typename recombination_model>
     void
     evolve_generation(
-        const GSLrng_t& rng, poptype& pop, const std::vector<std::size_t> N_next,
+        const GSLrng_t& rng, poptype& pop, const std::vector<std::size_t> Ns_next,
         const double mu,
         const mutation_model& mmodel, const recombination_model& recmodel,
         const pick1_function& pick1, const pick2_function& pick2,
@@ -61,12 +61,12 @@ namespace eebfwdpy
             g.n = 0;
 
         // Total metapopulation size
-        std::size_t N_next_tot = 0;
-        for (auto& n : N_next)
-            N_next_tot += n;
+        std::size_t N_next = 0;
+        for (auto& n : Ns_next)
+            N_next += n;
 
-        decltype(pop.diploids) offspring(N_next_tot);
-        decltype(pop.diploid_metadata) offspring_metadata(N_next_tot);
+        decltype(pop.diploids) offspring(N_next);
+        decltype(pop.diploid_metadata) offspring_metadata(N_next);
         // Generate the offspring
         std::size_t label = 0;
         for (auto& dip : offspring)
@@ -107,6 +107,6 @@ namespace eebfwdpy
         pop.diploids.swap(offspring);
         pop.diploid_metadata.swap(offspring_metadata);
     }
-} // namespace fwdpy11
+} // namespace eebfwdpy
 
 #endif
