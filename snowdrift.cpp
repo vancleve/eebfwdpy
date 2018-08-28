@@ -85,7 +85,8 @@ struct snowdrift : public fwdpy11::SlocusPopGeneticValue
     }
 
     inline double
-    genetic_value_to_fitness(const fwdpy11::DiploidMetadata &metadata) const
+    genetic_value_to_fitness(const fwdpy11::DiploidMetadata &metadata,
+			     const std::vector<std::size_t> N_psum) const
     // This function converts genetic value to fitness.
     {
         double fitness = 0.0;
