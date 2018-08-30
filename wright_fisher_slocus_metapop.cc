@@ -18,6 +18,16 @@
 // along with fwdpy11.  If not, see <http://www.gnu.org/licenses/>.
 //
 
+// ** Build with https://github.com/tbenthompson/cppimport **
+// clang-format off
+<% 
+import fwdpy11 as fp11 
+cfg['include_dirs'] = [ fp11.get_includes(), fp11.get_fwdpp_includes() ]
+cfg['dependencies'] = ['SlocusMetapop_generation.hpp']
+setup_pybind11(cfg)
+%>
+// clang-format on
+
 #include <pybind11/pybind11.h>
 #include <pybind11/numpy.h>
 #include <pybind11/functional.h>
@@ -65,10 +75,6 @@ calculate_fitness(const fwdpy11::GSLrng_t &rng, fwdpy11::SlocusPop &pop,
             parental_fitnesses[i] = pop.diploid_metadata[i].w;
             sum_parental_fitnesses += parental_fitnesses[i];
         }
-    // If the sum of parental fitnesses is not finite,
-    // then the genetic value calculator returned a non-finite value/
-    // Unfortunately, gsl_ran_discrete_preproc allows such values through
-    // without raising an error, so we have to check things here.
     if (!std::isfinite(sum_parental_fitnesses))
         {
             throw std::runtime_error("non-finite fitnesses encountered");
@@ -78,7 +84,13 @@ calculate_fitness(const fwdpy11::GSLrng_t &rng, fwdpy11::SlocusPop &pop,
 }
 
 // For the moment being, this function will implement a group competition demography
-// so that local competition is minimized (sensu Lehmann & Rousset 2010 PTRS)
+// so that local competition is minimized (sensu Lehmann & Rousset 2010 PTRS).
+//
+// Life cycle:
+// - Fitness is calculated based on interactions within a deme
+// - Demes compete for resources in the next generation based on total deme fitness
+// - Demes are populated by offspring from only one parent deme
+// - Offspring become adults who can migrate between demes
 //
 // TODO: generalize for more kinds of demography
 //
@@ -163,25 +175,35 @@ update_deme_map(std::vector<std::size_t> &label_to_deme, std::vector<std::size_t
 		py::array_t<std::size_t> metapopsizes, std::size_t gen)
 {
     auto mp = metapopsizes.unchecked<2>(); // pybind11 access w/o bounds checking
-    // number of demes
-    std::size_t nd = static_cast<std::size_t>(mp.shape(1));
+    const std::size_t nd = static_cast<std::size_t>(mp.shape(1));
+
+    if (gen > = mp.shape(0))
+        {
+	    throw std::invalid_argument(
+                "cannot update_deme_map sampling beyond generation " +
+		std::to_string(gen));
+        }
+    if (N_psum.size() != nd + 1)
+	{
+	    throw std::invalid_argument("N_psum has wrong size");
+	}
     
     // calculate partial sums
-    N_psum[0] = mp(gen, 0);
-    for (std::size_t d = 1; d < nd; ++d)
+    N_psum[0] = 0;
+    for (std::size_t d = 0; d < nd; ++d)
 	{
-	    N_psum[d] = N_psum[d-1] + mp(gen, d);
+	    N_psum[d+1] = N_psum[d] + mp(gen, d);
 	}
 	    
     // total population size (at generation `gen`)
-    std::size_t N = N_psum[nd-1];   
+    std::size_t N = N_psum[nd];   
     
     // update deme map
     label_to_deme.resize(N);
     std::sizt_t d = 0;
     for (std::sizt_t i = 0; i < N; ++i)
 	{
-	    if (i < N_psum[d])
+	    if (i < N_psum[d+1])
 		label_to_deme[i] = d;
 	    else
 		++d;
@@ -264,7 +286,7 @@ wfSlocusMetapop(
     // partial sums of population size for all demes
     // (used to locate all individuals in a specific deme)
     std::vector<std::size_t> label_to_deme(pop.N);
-    std::vector<std::size_t> N_psum(nd);
+    std::vector<std::size_t> N_psum(nd + 1);
     
     // E[S_{2N}] I got the expression from Ewens.
     // JVC: this is probably very conservative for a metapop
@@ -331,7 +353,7 @@ wfSlocusMetapop(
 	    // update label_to_deme and N_psum to offspring generation
 	    update_deme_map(label_to_deme, N_psum, metapopsizes, gen); 
         
-            fwdpy11::evolve_generation(
+            eebfwdpy::evolve_generation(
                 rng, pop, N_next, mu_neutral + mu_selected, bound_mmodel,
                 bound_rmodel, pick_first_parent, pick_second_parent,
                 generate_offspring_metadata);
@@ -349,7 +371,7 @@ wfSlocusMetapop(
 
 PYBIND11_MODULE(wright_fisher_slocus_metapop, m)
 {
-    m.doc() = "Evolution under a Wright-Fisher model.";
+    m.doc() = "Evolution in a metapopulation under a Wright-Fisher model.";
 
     m.def("WFSlocusMetapop", &wfSlocusMetapop);
 }

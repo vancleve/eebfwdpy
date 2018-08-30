@@ -3,8 +3,8 @@
 #a rebuild every time, but that clearly
 #wouldn't be needed for normal use.
 import cppimport
-cppimport.force_rebuild()
 cppimport.set_quiet(False)
+cppimport.force_rebuild()
 snowdrift = cppimport.imp("snowdrift")
 import unittest
 import numpy as np
@@ -27,8 +27,7 @@ def evolve_snowdrift_dist(ngens, N, x0, mu, sig, slope, b1, b2, c1, c2,
     p = {'sregions': [fp11.GaussianS(0, 1, 1, sig, 1.0)],
          'recregions': [fp11.Region(0, 1, 1)],
          'nregions': [],
-         'gvalue': (snowdrift.SlocusSnowdrift,
-                    (rng, b1, b2, c1, c2, slope, x0)),
+         'gvalue': snowdrift.SlocusSnowdrift(rng, b1, b2, c1, c2, slope, x0),
          'demography': nlist,
          'rates': (0.0, mu, 0.0),
          'prune_selected': False}

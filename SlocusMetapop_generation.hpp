@@ -25,9 +25,9 @@
 #include <fwdpp/insertion_policies.hpp>
 #include <fwdpp/mutate_recombine.hpp>
 #include <fwdpy11/rng.hpp>
+#include <fwdpy11/types/SlocusPop.hpp>
 #include <fwdpy11/genetic_values/SlocusPopGeneticValue.hpp>
 #include <gsl/gsl_randist.h>
-#include "SlocusMetapop.hpp"
 
 namespace eebfwdpy
 {

@@ -1,50 +1,28 @@
-/* Implement a stateful fitness model.
- * We define a new C++ type that will be
- * wrapped as a fwdpy11.fitness.SlocusFitness
- * object.
- *
- * Such a fitness model is ultimately responsible
- * for generating a bound C++ callback whose signature
- * is fwdpy11::single_locus_fitness_fxn.
+/* Helping in a metapopluation with fwdpy11.
  *
  * The module is built using cppimport:
  * https://github.com/tbenthompson/cppimport
  */
-
-/* The next block of code is used by cppimport
- * The formatting is important, so I protect it
- * from the auto-formatter that I use.
- */
 // clang-format off
 <% 
-#import fwdpy11 so we can find its C++ headers
 import fwdpy11 as fp11 
-#add fwdpy11 header locations to the include path
 cfg['include_dirs'] = [ fp11.get_includes(), fp11.get_fwdpp_includes() ]
-#On OS X using clang, there is more work to do.  Using gcc on OS X
-#gets rid of these requirements. The specifics sadly depend on how
-#you initially built fwdpy11, and what is below assumes you used
-#the provided setup.py + OS X + clang:
-#cfg['compiler_args'].extend(['-stdlib=libc++','-mmacosx-version-min=10.7'])
-#cfg['linker_args']=['-stdlib=libc++','-mmacosx-version-min=10.7']
-#An alternative to the above is to add the first line to CPPFLAGS
-#and the second to LDFLAGS when compiling a plugin on OS X using clang.
 setup_pybind11(cfg)
 %>
 // clang-format on
 
+
+#include <cmath>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
-
 #include <fwdpy11/types/SlocusPop.hpp>
 #include <fwdpp/fitness_models.hpp>
 #include <fwdpy11/genetic_values/SlocusPopGeneticValue.hpp>
-
 #include <gsl/gsl_rng.h>
       
 namespace py = pybind11;
 
-struct snowdrift : public fwdpy11::SlocusPopGeneticValue
+struct helping : public fwdpy11::SlocusPopGeneticValue
 /* This is our stateful fitness object.
  * It records the model parameters and holds a
  * vector to track individual phenotypes.
@@ -63,16 +41,15 @@ struct snowdrift : public fwdpy11::SlocusPopGeneticValue
  */
 {
     const fwdpy11::GSLrng_t& rng;
-    const double b1, b2, c1, c2;
+    const double b, c;
     const double sigslope, pheno0;
     std::vector<double> phenotypes;
 	
-    snowdrift(const fwdpy11::GSLrng_t& rng_,
-	      double b1_, double b2_, double c1_, double c2_,
+    helping(const fwdpy11::GSLrng_t& rng_,
+	      double b_, double c_,
 	      double sigslope_, double pheno0_)
         : fwdpy11::SlocusPopGeneticValue{}, rng(rng_),
-	  b1(b1_), b2(b2_), c1(c1_), c2(c2_),
-	  sigslope(sigslope_), pheno0(pheno0_), phenotypes()
+	  b(b_), c(c_), sigslope(sigslope_), pheno0(pheno0_), phenotypes()
     {
     }
 
@@ -85,24 +62,25 @@ struct snowdrift : public fwdpy11::SlocusPopGeneticValue
     }
 
     inline double
-    genetic_value_to_fitness(const fwdpy11::DiploidMetadata &metadata) const
+    genetic_value_to_fitness(const fwdpy11::DiploidMetadata &metadata,
+			     const std::vector<std::size_t> N_psum) const
     // This function converts genetic value to fitness.
     {
         double fitness = 0.0;
         double zself = metadata.g;
         auto N = phenotypes.size();
 
-	// get random partner k
-	std::size_t k = gsl_rng_uniform_int(rng.get(), N-1);
+	// get random partner k in current deme
+	std::size_t k = N_psum[metadata.deme]
+	  + gsl_rng_uniform_int(rng.get(), N_psum[metadata.deme+1] - N_psum[metadata.deme] - 1);
 	if (k >= metadata.label)
 	    {
 		++k;
 	    }
-
-	double zpair = zself + phenotypes[k];
-	// Payoff function from Fig 1 of Doebeli, Hauert & Killingback (2004, Science)
-	fitness += 1 + b1 * zpair + b2 * zpair * zpair
-	    - c1 * zself - c2 * zself * zself;
+	double zother = phenotypes[k];
+	
+	// Payoff function
+	fitness += 1 + b * std::sqrt(zother) - c * std::pow(zself, 2.0);
 
        	return std::max(fitness, 0.0);
     }
@@ -170,26 +148,26 @@ struct phenotype_sampler
     
 };
 
-PYBIND11_MODULE(snowdrift, m)
+PYBIND11_MODULE(SlocusHelpingMetapop, m)
 {
-  m.doc() = "Snowdrift cooperation model.";
+  m.doc() = "Helping metapopulation model.";
     
 
   // We need to import the Python version of our base class:
-  pybind11::object imported_snowdrift_base_class_type
+  pybind11::object imported_helping_base_class_type
     = pybind11::module::import("fwdpy11.genetic_values")
     .attr("SlocusPopGeneticValue");
   
   // Create a Python class based on our new type
-  py::class_<snowdrift, fwdpy11::SlocusPopGeneticValue>(m, "SlocusSnowdrift")
-    .def(py::init<const fwdpy11::GSLrng_t&, double, double, double, double, double, double>(),
+  py::class_<helping, fwdpy11::SlocusPopGeneticValue>(m, "SlocusHelpingMetapop")
+    .def(py::init<const fwdpy11::GSLrng_t&, double, double, double, double>(),
 	 py::arg("rng"),
-	 py::arg("b1"), py::arg("b2"), py::arg("c1"), py::arg("c2"),
+	 py::arg("b"), py::arg("c"),
 	 py::arg("sigslope"), py::arg("pheno0"))
-    .def_readwrite("phenotypes", &snowdrift::phenotypes, "snowdrift phenotypes")
-    .def("update", &snowdrift::update, py::arg("pop"));
+    .def_readwrite("phenotypes", &helping::phenotypes, "helping phenotypes")
+    .def("update", &helping::update, py::arg("pop"));
   
-  py::class_<phenotype_sampler>(m, "SamplerSnowdrift")
+  py::class_<phenotype_sampler>(m, "PhenotypeSampler")
     .def(py::init<std::size_t>(),
 	 py::arg("sample_time"))
     .def("__call__",

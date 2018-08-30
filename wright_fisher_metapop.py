@@ -40,8 +40,8 @@ def evolve(rng, pop, params, recorder=None):
         # Will throw exception if anything is wrong:
         params.validate()
 
-    from .internal import makeMutationRegions, makeRecombinationRegions
-    from .wright_fisher_slocus_metapop import WFSlocusMetapop
+    from fwdpy11.internal import makeMutationRegions, makeRecombinationRegions
+    from . wright_fisher_slocus_metapop import WFSlocusMetapop
     pneutral = params.mutrate_n/(params.mutrate_n+params.mutrate_s)
     mm = makeMutationRegions(rng, pop, params.nregions,
                              params.sregions, pneutral)
