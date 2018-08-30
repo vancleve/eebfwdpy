@@ -40,12 +40,7 @@ def evolve(rng, pop, params, recorder=None):
         params.validate()
 
     from fwdpy11.internal import makeMutationRegions, makeRecombinationRegions
-    import cppimport
-    cppimport.set_quiet(False)
-    cppimport.force_rebuild()
-    wright_fisher_slocus_metapop = cppimport.imp("wright_fisher_slocus_metapop")
-
-    from . wright_fisher_slocus_metapop import WFSlocusMetapop
+    from wright_fisher_slocus_metapop import WFSlocusMetapop
     pneutral = params.mutrate_n/(params.mutrate_n+params.mutrate_s)
     mm = makeMutationRegions(rng, pop, params.nregions,
                              params.sregions, pneutral)

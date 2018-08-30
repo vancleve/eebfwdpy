@@ -8,6 +8,7 @@
 import fwdpy11 as fp11 
 cfg['include_dirs'] = [ fp11.get_includes(), fp11.get_fwdpp_includes() ]
 cfg['dependencies'] = ['SlocusMetapopGeneticValue.hpp']
+cfg['compiler_args'].extend(['-std=c++11'])
 setup_pybind11(cfg)
 %>
 // clang-format on
@@ -47,8 +48,8 @@ struct helping : public fwdpy11::SlocusMetapopGeneticValue
     std::vector<double> phenotypes;
 	
     helping(const fwdpy11::GSLrng_t &rng_,
-	      double b_, double c_,
-	      double sigslope_, double pheno0_)
+	    double b_, double c_,
+	    double sigslope_, double pheno0_)
         : fwdpy11::SlocusMetapopGeneticValue{}, rng(rng_),
 	  b(b_), c(c_), sigslope(sigslope_), pheno0(pheno0_), phenotypes()
     {

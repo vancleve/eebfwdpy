@@ -9,7 +9,7 @@ import unittest
 import numpy as np
 import matplotlib.pyplot as plt
 import fwdpy11 as fp11
-from . wright_fisher_metapop import evolve
+from wright_fisher_metapop import evolve
 
 
 def evolve_helping(ngens, N, x0, mu, sig, slope, b, c,

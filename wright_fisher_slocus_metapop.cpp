@@ -24,6 +24,7 @@
 import fwdpy11 as fp11 
 cfg['include_dirs'] = [ fp11.get_includes(), fp11.get_fwdpp_includes() ]
 cfg['dependencies'] = ['SlocusMetapopGeneticValue.hpp', 'SlocusMetapop_generation.hpp']
+cfg['compiler_args'].extend(['-std=c++11'])
 setup_pybind11(cfg)
 %>
 // clang-format on
