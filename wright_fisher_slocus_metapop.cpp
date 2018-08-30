@@ -23,7 +23,7 @@
 <% 
 import fwdpy11 as fp11 
 cfg['include_dirs'] = [ fp11.get_includes(), fp11.get_fwdpp_includes() ]
-cfg['dependencies'] = ['SlocusMetapop_generation.hpp']
+cfg['dependencies'] = ['SlocusMetapopGeneticValue.hpp', 'SlocusMetapop_generation.hpp']
 setup_pybind11(cfg)
 %>
 // clang-format on
@@ -45,16 +45,16 @@ setup_pybind11(cfg)
 #include <fwdpy11/rng.hpp>
 #include <fwdpy11/samplers.hpp>
 #include <fwdpy11/sim_functions.hpp>
-#include <fwdpy11/genetic_values/SlocusPopGeneticValue.hpp>
 #include <fwdpy11/genetic_values/GeneticValueToFitness.hpp>
+#include "SlocusMetapopGeneticValue.hpp"
 #include "SlocusMetapop_generation.hpp"
 
 namespace py = pybind11;
 
 std::vector<double>
 calculate_fitness(const fwdpy11::GSLrng_t &rng, fwdpy11::SlocusPop &pop,
-                  const fwdpy11::SlocusPopGeneticValue &genetic_value_fxn,
-		  std::vector<std::size_t> N_psum)
+                  const fwdpy11::SlocusMetapopGeneticValue &genetic_value_fxn,
+		  std::vector<std::size_t> &N_psum)
 {
     // Calculate parental fitnesses
     std::vector<double> parental_fitnesses(pop.diploids.size());
@@ -97,19 +97,19 @@ calculate_fitness(const fwdpy11::GSLrng_t &rng, fwdpy11::SlocusPop &pop,
 std::vector<fwdpp::fwdpp_internal::gsl_ran_discrete_t_ptr>
 calculate_parent_sampling(const fwdpy11::GSLrng_t &rng,
 			  fwdpy11::SlocusPop &pop,
-			  const std::vector<double> parental_fitnesses,
-			  const py::array_t<std::size_t> metapopsizes,
-                          const py::array_t<double> migrate,
-			  std::vector<std::size_t> &label_to_deme)
+			  const std::vector<double> &parental_fitnesses,
+			  const py::array_t<std::size_t> &metapopsizes,
+                          const py::array_t<double> &migrate)
 {
     // pybind11 access w/o bounds checking
     auto mp  = metapopsizes.unchecked<2>();
-    auto mig = migrate.unchecked<2>();    
+    auto mig = migrate.unchecked<2>();
+    const std::size_t num_generations = static_cast<std::size_t>(mp.shape(0));
     const std::size_t nd = static_cast<std::size_t>(mp.shape(1));
     const std::size_t offgen = pop.generation+1;
     std::vector<double> deme_fitnesses(nd);
 
-    if (offgen >= mp.shape(0))
+    if (offgen >= num_generations)
         {
             throw std::invalid_argument(
                 "cannot calculate fitness sampling beyond generation " +
@@ -117,9 +117,9 @@ calculate_parent_sampling(const fwdpy11::GSLrng_t &rng,
         }
     
     // calculate deme fitness and use for group competition
-    for (std::size_t i = 0; d < pop.N; ++i)
+    for (std::size_t i = 0; i < pop.N; ++i)
         {
-            deme_fitnesses[label_to_deme[i]] += pop.diploid_metadata[i].w;
+            deme_fitnesses[pop.diploid_metadata[i].deme] += pop.diploid_metadata[i].w;
         }
     
     auto deme_lookup = fwdpp::fwdpp_internal::gsl_ran_discrete_t_ptr(
@@ -141,15 +141,16 @@ calculate_parent_sampling(const fwdpy11::GSLrng_t &rng,
             for (std::size_t i = 0; i < pop.N; ++i)
                 {
                     post_migration[i] = 0;
-                    for (std::size_t d_src = 0; d_src < nd; ++j)
+                    for (std::size_t d_src = 0; d_src < nd; ++d_src)
                         {
 			    // for parent i living in deme d_src, calculate the
 			    // number of offspring it sends to deme d_dest.
 			    // for group competition, this is
 			    // success of group d_src * popsize d_src * fitness[i] / deme_fitness[i] * migration
-                            post_migration[i] +=
-				(deme_parents[d_src] == label_to_deme[i]) * mp(offgen, d_src);
-                                * parental_fitnesses[i] / deme_fitnesses[pop.deme_map[i]]
+			    post_migration[i] +=
+				(deme_parents[d_src] == pop.diploid_metadata[i].deme)
+				* mp(offgen, d_src)
+                                * parental_fitnesses[i] / deme_fitnesses[pop.diploid_metadata[i].deme]
                                 * mig(d_dest, d_src);
                         }
                 }
@@ -164,20 +165,21 @@ calculate_parent_sampling(const fwdpy11::GSLrng_t &rng,
                         "fitness lookup table for deme "
                         + std::to_string(d_dest) + " could not be generated");
                 }
-            lookups[d_dest] = rv;
+            lookups[d_dest] = std::move(rv); // can only move std::unique_ptr
         }
     
     return lookups;
 }
     
 void
-update_deme_map(std::vector<std::size_t> &label_to_deme, std::vector<std::size_t> N_psum,
-		py::array_t<std::size_t> metapopsizes, std::size_t gen)
+update_deme_map(std::vector<std::size_t> &label_to_deme, std::vector<std::size_t> &N_psum,
+		py::array_t<std::size_t> &metapopsizes, std::size_t gen)
 {
     auto mp = metapopsizes.unchecked<2>(); // pybind11 access w/o bounds checking
     const std::size_t nd = static_cast<std::size_t>(mp.shape(1));
+    const std::size_t num_generations = static_cast<std::size_t>(mp.shape(0));
 
-    if (gen > = mp.shape(0))
+    if (gen >= num_generations)
         {
 	    throw std::invalid_argument(
                 "cannot update_deme_map sampling beyond generation " +
@@ -200,8 +202,8 @@ update_deme_map(std::vector<std::size_t> &label_to_deme, std::vector<std::size_t
     
     // update deme map
     label_to_deme.resize(N);
-    std::sizt_t d = 0;
-    for (std::sizt_t i = 0; i < N; ++i)
+    std::size_t d = 0;
+    for (std::size_t i = 0; i < N; ++i)
 	{
 	    if (i < N_psum[d+1])
 		label_to_deme[i] = d;
@@ -236,10 +238,9 @@ wfSlocusMetapop(
     const fwdpy11::GSLrng_t &rng, fwdpy11::SlocusPop &pop,
     py::array_t<std::size_t> metapopsizes, py::array_t<double> migrate, 
     const double mu_neutral, const double mu_selected, const double recrate,
-    const fwdpp::extensions::discrete_mut_model<eebfwdpy::SlocusMetapop::mcont_t>
-        &mmodel,
+    const fwdpp::extensions::discrete_mut_model<fwdpy11::SlocusPop::mcont_t> &mmodel,
     const fwdpp::extensions::discrete_rec_model &rmodel,
-    fwdpy11::SlocusPopGeneticValue &genetic_value_fxn,
+    fwdpy11::SlocusMetapopGeneticValue &genetic_value_fxn,
     fwdpy11::SlocusPop_temporal_sampler recorder, const double selfing_rate,
     const bool remove_selected_fixations)
 {
@@ -276,11 +277,9 @@ wfSlocusMetapop(
 	throw std::invalid_argument("number of demes must match migration matrix size");
       }
 
-    const std::size_t num_generations
-	= static_cast<std::size_t>(metapopsizes.shape()[0]);
-    const std::size_t nd
-	= static_cast<std::size_t>(metapopsizes.shape()[1]);
-
+    auto mp = metapopsizes.unchecked<2>(); // pybind11 access w/o bounds checking
+    const std::size_t nd = static_cast<std::size_t>(mp.shape(1));
+    const std::size_t num_generations = static_cast<std::size_t>(mp.shape(0));
 
     // mapping from individual label to deme and
     // partial sums of population size for all demes
@@ -305,8 +304,7 @@ wfSlocusMetapop(
     auto parental_fitnesses = calculate_fitness(rng, pop, genetic_value_fxn, N_psum);
     auto lookups = calculate_parent_sampling(rng, pop,
                                              parental_fitnesses,
-                                             metapopsizes, migrate,
-					     label_to_deme);
+                                             metapopsizes, migrate);
     recorder(pop);
 
     // Generate our fxns for picking parents
@@ -353,7 +351,7 @@ wfSlocusMetapop(
 	    // update label_to_deme and N_psum to offspring generation
 	    update_deme_map(label_to_deme, N_psum, metapopsizes, gen); 
         
-            eebfwdpy::evolve_generation(
+            fwdpy11::evolve_generation(
                 rng, pop, N_next, mu_neutral + mu_selected, bound_mmodel,
                 bound_rmodel, pick_first_parent, pick_second_parent,
                 generate_offspring_metadata);
@@ -363,8 +361,7 @@ wfSlocusMetapop(
 	    parental_fitnesses = calculate_fitness(rng, pop, genetic_value_fxn, N_psum);
 	    lookups = calculate_parent_sampling(rng, pop,
 						parental_fitnesses,
-						metapopsizes, migrate,
-						label_to_deme);
+						metapopsizes, migrate);
             recorder(pop);
         }
 }

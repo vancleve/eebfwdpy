@@ -7,6 +7,7 @@
 <% 
 import fwdpy11 as fp11 
 cfg['include_dirs'] = [ fp11.get_includes(), fp11.get_fwdpp_includes() ]
+cfg['dependencies'] = ['SlocusMetapopGeneticValue.hpp']
 setup_pybind11(cfg)
 %>
 // clang-format on
@@ -17,21 +18,21 @@ setup_pybind11(cfg)
 #include <pybind11/stl.h>
 #include <fwdpy11/types/SlocusPop.hpp>
 #include <fwdpp/fitness_models.hpp>
-#include <fwdpy11/genetic_values/SlocusPopGeneticValue.hpp>
+#include "SlocusMetapopGeneticValue.hpp"
 #include <gsl/gsl_rng.h>
       
 namespace py = pybind11;
 
-struct helping : public fwdpy11::SlocusPopGeneticValue
+struct helping : public fwdpy11::SlocusMetapopGeneticValue
 /* This is our stateful fitness object.
  * It records the model parameters and holds a
  * vector to track individual phenotypes.
  *
- * Here, we publicly inherit from fwdpy11::SlocusPopGeneticValue,
+ * Here, we publicly inherit from fwdpy11::SlocusMetapopGeneticValue,
  * which is defined in the header included above.  It is
  * an abstract class in C++ terms, and is reflected
  * as a Python Abstract Base Class (ABC) called
- * fwdpy11.genetic_values.SlocusPopGeneticValue.
+ * fwdpy11.genetic_values.SlocusMetapopGeneticValue.
  *
  * The phenotypes get updated each generation during
  * the simulation.
@@ -40,15 +41,15 @@ struct helping : public fwdpy11::SlocusPopGeneticValue
  * calculated using fwdpp's machinery.
  */
 {
-    const fwdpy11::GSLrng_t& rng;
+    const fwdpy11::GSLrng_t &rng;
     const double b, c;
     const double sigslope, pheno0;
     std::vector<double> phenotypes;
 	
-    helping(const fwdpy11::GSLrng_t& rng_,
+    helping(const fwdpy11::GSLrng_t &rng_,
 	      double b_, double c_,
 	      double sigslope_, double pheno0_)
-        : fwdpy11::SlocusPopGeneticValue{}, rng(rng_),
+        : fwdpy11::SlocusMetapopGeneticValue{}, rng(rng_),
 	  b(b_), c(c_), sigslope(sigslope_), pheno0(pheno0_), phenotypes()
     {
     }
@@ -63,12 +64,11 @@ struct helping : public fwdpy11::SlocusPopGeneticValue
 
     inline double
     genetic_value_to_fitness(const fwdpy11::DiploidMetadata &metadata,
-			     const std::vector<std::size_t> N_psum) const
+			     const std::vector<std::size_t> &N_psum) const
     // This function converts genetic value to fitness.
     {
         double fitness = 0.0;
         double zself = metadata.g;
-        auto N = phenotypes.size();
 
 	// get random partner k in current deme
 	std::size_t k = N_psum[metadata.deme]
@@ -120,7 +120,7 @@ struct helping : public fwdpy11::SlocusPopGeneticValue
     py::object
     pickle() const
 	{
-	    return true;
+	    return py::make_tuple(b, c, phenotypes);
 	}
 };
 
@@ -148,18 +148,18 @@ struct phenotype_sampler
     
 };
 
-PYBIND11_MODULE(SlocusHelpingMetapop, m)
+PYBIND11_MODULE(helping_metapop, m)
 {
   m.doc() = "Helping metapopulation model.";
     
 
   // We need to import the Python version of our base class:
   pybind11::object imported_helping_base_class_type
-    = pybind11::module::import("fwdpy11.genetic_values")
-    .attr("SlocusPopGeneticValue");
+    = pybind11::module::import("genetic_values")
+    .attr("SlocusMetapopGeneticValue");
   
   // Create a Python class based on our new type
-  py::class_<helping, fwdpy11::SlocusPopGeneticValue>(m, "SlocusHelpingMetapop")
+  py::class_<helping, fwdpy11::SlocusMetapopGeneticValue>(m, "SlocusHelping")
     .def(py::init<const fwdpy11::GSLrng_t&, double, double, double, double>(),
 	 py::arg("rng"),
 	 py::arg("b"), py::arg("c"),
@@ -171,7 +171,7 @@ PYBIND11_MODULE(SlocusHelpingMetapop, m)
     .def(py::init<std::size_t>(),
 	 py::arg("sample_time"))
     .def("__call__",
-	 [](phenotype_sampler& f, const fwdpy11::SlocusPop &p) { return f(p); },
+	 [](phenotype_sampler &f, const fwdpy11::SlocusPop &p) { return f(p); },
 	 py::arg("pop"))
     .def_readwrite("phenotypes", &phenotype_sampler::phenotypes, "sampled phenotypes");
 

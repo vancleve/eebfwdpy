@@ -1,6 +1,8 @@
 import cppimport
 cppimport.set_quiet(False)
 cppimport.force_rebuild()
+cppimport.imp("genetic_values")
+cppimport.imp("wright_fisher_slocus_metapop")
 helping = cppimport.imp("helping_metapop")
 
 import unittest

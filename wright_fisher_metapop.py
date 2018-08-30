@@ -16,7 +16,6 @@
 # You should have received a copy of the GNU General Public License
 # along with fwdpy11.  If not, see <http://www.gnu.org/licenses/>.
 #
-#from .wfevolve import evolve_singlepop_regions_cpp
 
 
 def evolve(rng, pop, params, recorder=None):
@@ -41,6 +40,11 @@ def evolve(rng, pop, params, recorder=None):
         params.validate()
 
     from fwdpy11.internal import makeMutationRegions, makeRecombinationRegions
+    import cppimport
+    cppimport.set_quiet(False)
+    cppimport.force_rebuild()
+    wright_fisher_slocus_metapop = cppimport.imp("wright_fisher_slocus_metapop")
+
     from . wright_fisher_slocus_metapop import WFSlocusMetapop
     pneutral = params.mutrate_n/(params.mutrate_n+params.mutrate_s)
     mm = makeMutationRegions(rng, pop, params.nregions,

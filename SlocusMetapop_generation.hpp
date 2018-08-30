@@ -16,8 +16,8 @@
 // You should have received a copy of the GNU General Public License
 // along with fwdpy11.  If not, see <http://www.gnu.org/licenses/>.
 //
-#ifndef EEBFWDPY_SLOCUSMETAPOP_GENERATION_HPP__
-#define EEBFWDPY_SLOCUSMETAPOP_GENERATION_HPP__
+#ifndef FWDPY11_EVOLVE_SLOCUSMETAPOP_GENERATION_HPP__
+#define FWDPY11_EVOLVE_SLOCUSMETAPOP_GENERATION_HPP__
 
 #include <tuple>
 #include <type_traits>
@@ -26,10 +26,11 @@
 #include <fwdpp/mutate_recombine.hpp>
 #include <fwdpy11/rng.hpp>
 #include <fwdpy11/types/SlocusPop.hpp>
-#include <fwdpy11/genetic_values/SlocusPopGeneticValue.hpp>
+//#include <fwdpy11/genetic_values/SlocusPopGeneticValue.hpp>
+#include "SlocusMetapopGeneticValue.hpp"
 #include <gsl/gsl_randist.h>
 
-namespace eebfwdpy
+namespace fwdpy11
 {
     template <typename poptype, typename pick1_function,
               typename pick2_function, typename update_function,
@@ -102,6 +103,6 @@ namespace eebfwdpy
         pop.diploids.swap(offspring);
         pop.diploid_metadata.swap(offspring_metadata);
     }
-} // namespace eebfwdpy
+} // namespace fwdpy11
 
 #endif
