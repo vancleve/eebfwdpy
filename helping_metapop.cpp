@@ -17,10 +17,13 @@ setup_pybind11(cfg)
 #include <cmath>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
+#include <pybind11/iostream.h>
 #include <fwdpy11/types/SlocusPop.hpp>
 #include <fwdpp/fitness_models.hpp>
 #include "SlocusMetapopGeneticValue.hpp"
 #include <gsl/gsl_rng.h>
+#include <iostream>
+#include <iomanip>
       
 namespace py = pybind11;
 
@@ -43,15 +46,16 @@ struct helping : public fwdpy11::SlocusMetapopGeneticValue
  */
 {
     const fwdpy11::GSLrng_t &rng;
-    const double b, c;
+    const double b, bex, c, cex;
     const double sigslope, pheno0;
     std::vector<double> phenotypes;
 	
     helping(const fwdpy11::GSLrng_t &rng_,
-	    double b_, double c_,
+	    double b_, double bex_, double c_, double cex_,
 	    double sigslope_, double pheno0_)
         : fwdpy11::SlocusMetapopGeneticValue{}, rng(rng_),
-	  b(b_), c(c_), sigslope(sigslope_), pheno0(pheno0_), phenotypes()
+	  b(b_), bex(bex_), c(c_), cex(cex_),
+	  sigslope(sigslope_), pheno0(pheno0_), phenotypes()
     {
     }
 
@@ -80,9 +84,10 @@ struct helping : public fwdpy11::SlocusMetapopGeneticValue
 	    }
 	double zother = phenotypes[k];
 	
-	// Payoff function
-	fitness += 1 + b * std::sqrt(zother) - c * std::pow(zself, 2.0);
+	// Payoff function (benefit and cost functions are power laws)
+	fitness += 1 + b * std::pow(zother, bex) - c * std::pow(zself, cex);
 
+	// py::print(metadata.label, ",", k,"| self:", zself, "other:", zother);
        	return std::max(fitness, 0.0);
     }
 
@@ -121,7 +126,7 @@ struct helping : public fwdpy11::SlocusMetapopGeneticValue
     py::object
     pickle() const
 	{
-	    return py::make_tuple(b, c, phenotypes);
+	    return py::make_tuple(phenotypes);
 	}
 };
 
@@ -138,6 +143,20 @@ struct phenotype_sampler
     {
 	if (pop.generation % sample_time == 0)
 	    {
+		std::cout << std::fixed;
+		for (std::size_t i = 0; i < pop.N; ++i)
+		    {
+			std::cout << std::setprecision(5) << std::setw(4) << i
+				  << ", d: " << std::setw(3) << pop.diploid_metadata[i].deme
+				  << " | p1: " << std::setw(3) << pop.diploid_metadata[i].parents[0]
+				  << " p2: " << std::setw(3) << pop.diploid_metadata[i].parents[1] 
+				  << " z: " << std::setw(6) << pop.diploid_metadata[i].g
+				  << " w: " << std::setw(6) << pop.diploid_metadata[i].w
+				  << "\n";
+		    }
+		std::cout << "gen: " << pop.generation << "\n";
+		std::cout << "--" << "\n";
+				
 		std::vector<double> new_samples(pop.N);
 		for (std::size_t i = 0; i < pop.N; ++i)
 		    {
@@ -153,7 +172,6 @@ PYBIND11_MODULE(helping_metapop, m)
 {
   m.doc() = "Helping metapopulation model.";
     
-
   // We need to import the Python version of our base class:
   pybind11::object imported_helping_base_class_type
     = pybind11::module::import("genetic_values")
@@ -161,9 +179,10 @@ PYBIND11_MODULE(helping_metapop, m)
   
   // Create a Python class based on our new type
   py::class_<helping, fwdpy11::SlocusMetapopGeneticValue>(m, "SlocusHelping")
-    .def(py::init<const fwdpy11::GSLrng_t&, double, double, double, double>(),
+    .def(py::init<const fwdpy11::GSLrng_t&,
+	 double, double, double, double, double, double>(),
 	 py::arg("rng"),
-	 py::arg("b"), py::arg("c"),
+	 py::arg("b"), py::arg("bex"), py::arg("c"), py::arg("cex"),
 	 py::arg("sigslope"), py::arg("pheno0"))
     .def_readwrite("phenotypes", &helping::phenotypes, "helping phenotypes")
     .def("update", &helping::update, py::arg("pop"));
@@ -175,5 +194,4 @@ PYBIND11_MODULE(helping_metapop, m)
 	 [](phenotype_sampler &f, const fwdpy11::SlocusPop &p) { return f(p); },
 	 py::arg("pop"))
     .def_readwrite("phenotypes", &phenotype_sampler::phenotypes, "sampled phenotypes");
-
 }

@@ -1,42 +1,43 @@
+# build packages
 import cppimport
 cppimport.set_quiet(False)
-cppimport.force_rebuild()
+#cppimport.force_rebuild()
 cppimport.imp("genetic_values")
 cppimport.imp("wright_fisher_slocus_metapop")
 helping = cppimport.imp("helping_metapop")
-
-import unittest
 import numpy as np
 import matplotlib.pyplot as plt
 import fwdpy11 as fp11
-from wright_fisher_metapop import evolve
+import fwdpy11.model_params
 
 
-def evolve_helping(ngens, N, x0, mu, sig, slope, b, c,
+def evolve_helping(ngens, N, m, x0, mu, sig, slope, b, bex, c, cex,
                    step=1, seed=42):
-    pop = fp11.SlocusPop(N)
+    from wright_fisher_metapop import evolve
 
     # Initialize a random number generator
     rng = fp11.GSLrng(seed)
 
-    # nlist = np.array([N]*step,dtype=np.uint32)
-    nlist = np.array([N]*ngens, dtype=np.uint32)
+    nd = m.shape[0]
+    nlist = np.array([N]*ngens*nd, dtype=np.uint32).reshape(ngens, nd)
+    pop = fp11.SlocusPop(N*nd)
 
     p = {'sregions': [fp11.GaussianS(0, 1, 1, sig, 1.0)],
          'recregions': [fp11.Region(0, 1, 1)],
          'nregions': [],
-         'gvalue': helping.SlocusHelpingMetapop(rng, b, c, slope, x0),
-         'demography': nlist,
+         'gvalue': helping.SlocusHelping(rng,
+                                         b, bex, c, cex, slope, x0),
+         'demography': (nlist, m),
          'rates': (0.0, mu, 0.0),
          'prune_selected': False}
 
     params = fp11.model_params.ModelParams(**p)
 
-    helping_sampler = helping.PhenotypeSampler(step)
+    sampler = helping.PhenotypeSampler(step)
 
-    fp11.wright_fisher.evolve(rng, pop, params, helping_sampler)
+    evolve(rng, pop, params, sampler)
 
-    return pop, helping_sampler
+    return pop, sampler
 
 
 def plotEvolveDist(vals, bins=100, interpolation=None, vmin=None, vmax=None,
@@ -58,9 +59,16 @@ def plotEvolveDist(vals, bins=100, interpolation=None, vmin=None, vmax=None,
     plt.show()
 
 
+def islandmat(nd, m):
+    return ((1-m) - m/(nd-1)) * np.eye(nd) + m / (nd-1) * np.ones((nd, nd))
+
+
 ### Examples in iPython
 
 # %matplotlib
+
+evolve_helping(1000, 4, islandmat(16,0.1), 0.5, 0.02, 0.1, 6,
+               20.0, 1.0, 0.8, 10.0, step=10)
 
 # time step=10; nstep=2000; pop, sampler = evolve_helping(nstep*step, 1000, 0.1, 0.01, 0.01, 6, 6, -1.4, 4.56, -1.6, step, 314)
 #plotEvolveDist(sampler.phenotypes, vmax=100)
