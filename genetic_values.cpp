@@ -30,7 +30,6 @@ setup_pybind11(cfg)
 
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
-// #include <fwdpy11/genetic_values/SlocusPopGeneticValue.hpp>
 #include "SlocusMetapopGeneticValue.hpp"
 
 namespace py = pybind11;

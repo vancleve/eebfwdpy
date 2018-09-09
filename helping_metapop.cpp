@@ -24,7 +24,7 @@ setup_pybind11(cfg)
 #include <gsl/gsl_rng.h>
 #include <iostream>
 #include <iomanip>
-      
+
 namespace py = pybind11;
 
 struct helping : public fwdpy11::SlocusMetapopGeneticValue
@@ -86,6 +86,11 @@ struct helping : public fwdpy11::SlocusMetapopGeneticValue
 	
 	// Payoff function (benefit and cost functions are power laws)
 	fitness += 1 + b * std::pow(zother, bex) - c * std::pow(zself, cex);
+	// std::cout << "label: " << std::setw(3) << metadata.label
+	// 	  << " zf: " << std::setprecision(5) << std::setw(6) << zself
+	// 	  << " zo: " << std::setprecision(5) << std::setw(6) << zother
+	// 	  << " f: " << std::setprecision(5) << std::setw(6) << fitness
+	// 	  << "\n";
 
 	// py::print(metadata.label, ",", k,"| self:", zself, "other:", zother);
        	return std::max(fitness, 0.0);
@@ -104,7 +109,6 @@ struct helping : public fwdpy11::SlocusMetapopGeneticValue
 
     inline void
     update(const fwdpy11::SlocusPop &pop)
-    // A stateful fitness model needs updating.
     {
 	double summut;
 	double sig0;
