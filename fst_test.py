@@ -4,9 +4,8 @@ test metapopulation simulation generation of neutral F_ST values
 
 """
 
-import sys
-from argparse import ArgumentParser
 import numpy as np
+import pandas as pd
 import fwdpy11 as fp11
 from fwdpy11.model_params import ModelParams
 import fwdpy11.sampling
@@ -29,13 +28,12 @@ class record_fst(object):
             self.data.append((pop.generation,
                               self.calc_fst(neutral, demes, True),
                               self.calc_fst(selected, demes, False)))
-            print(self.data[-1])
 
     def calc_fst(self, sample, demes, neutral=True):
         seq = libsequence.polytable.SimData(sample)
         if (len(seq) > 0):
             fst = libsequence.fst.Fst(seq, demes)
-            fst_val = fst.hbk()
+            fst_val = fst.hsm()
         else:
             fst_val = float('nan')
 
@@ -43,7 +41,7 @@ class record_fst(object):
 
 
 def evolve_pop(ngens, N, migm, z0, mu, rec, sig, slope, b, bex, c, cex,
-               step=1, seed=42, build=False):
+               step=1, seed=42, build=False, **kwargs):
 
     from wright_fisher_metapop import evolve
     import helping_metapop as helping
@@ -77,21 +75,54 @@ def islandmat(nd, m):
     return ((1-m) - m/(nd-1)) * np.eye(nd) + m / (nd-1) * np.ones((nd, nd))
 
 
+def read_params(parsdefault, json_file):
+    import json
+    if json_file:
+        with open(json_file) as f:
+            parf = json.load(f)
+
+    pars = parsdefault.copy()
+    rangfuncs = {'range': np.arange,
+                 'linspace': np.linspace,
+                 'logspace': np.logspace}
+
+    for p in pars.keys():
+        # if there is a json file,
+        # then take parameters from that file
+        if json_file:
+            if p in parf:
+                if 'value' in parf[p]:
+                    pars[p] = [parf[p]['value']]
+                    continue
+
+                for fname, func in rangfuncs.items():
+                    if fname in parf[p]:
+                        pars[p] = func(**parf[p][fname]).tolist()
+                        break
+            # else:
+            #     print(p, "not found")
+
+        # make sure each parameter is list
+        if type(pars[p]) != list:
+            pars[p] = [pars[p]]
+
+    return pars
+
+
 def main():
+    import sys
+    from argparse import ArgumentParser
+    import itertools as it
+    from pathos.multiprocessing import ProcessingPool as Pool
+
+    # commmand line arguments
     parser = ArgumentParser(prog='command', description='test FST values')
-
     parser.add_argument('--build', action="store_true", default=False,
-                        help="increase output verbosity")
-    parser.add_argument('--mu', type=float, default=0.01)
-    parser.add_argument('--mig', type=float, default=0.1)
-    parser.add_argument('--rec', type=float, default=0.01)
-    parser.add_argument('--size_demes', type=int, default=10)
-    parser.add_argument('--num_demes', type=int, default=100)
-    parser.add_argument('--ngens', type=int, default=10**4)
-    parser.add_argument('--z0', type=float, default=0.5)
-    parser.add_argument('--step', type=int, default=100)
-    parser.add_argument('--seed', type=int, default=0)
-
+                        help='build and exit')
+    parser.add_argument('--cpus', type=int, default=1)
+    parser.add_argument('--parfile', type=str)
+    parser.add_argument('--output', type=str,
+                        help='.feather with pandas DataFrame')
     args = parser.parse_args()
 
     if args.build:
@@ -102,21 +133,66 @@ def main():
         cppimport.imp("helping_metapop")
         sys.exit()
 
-    np.random.seed(args.seed)
-    pop, sampler = evolve_pop(args.ngens,
-                              args.size_demes,
-                              islandmat(args.num_demes, args.mig),
-                              args.z0,
-                              args.mu,
-                              args.rec,
-                              0.01,
-                              6.0,
-                              0.0, 1.0, 0.0, 1.0,
-                              args.step,
-                              np.random.randint(0, 2**32),
-                              args.build)
+    # simulation parameters and their defaults
+    param_default = {
+        'mu': 0.01,
+        'mig': 0.1,
+        'rec': 0.01,
+        'N': 10,
+        'nd': 100,
+        'ngens': 10**3,
+        'z0': 0.5,
+        'sig': 0.01,
+        'slope': 6.0,
+        'b': 0.0,
+        'bex': 1.0,
+        'c': 0.0,
+        'cex': 1.0,
+        'step': 100,
+        'reps': 10,
+        'mseed': 42
+        }
+
+    pvals = read_params(param_default, args.parfile)
+
+    # set master seed
+    np.random.seed(pvals['mseed'])
+
+    # expand reps to individual replicates
+    pvals['rep'] = list(np.arange(pvals.pop('reps')[0]))
+
+    # generate full parameter set w/ replicates and seeds
+    psets = list(it.product(*pvals.values()))
+    psets = [p + (np.random.randint(0, 2**32),) for p in psets]
+
+    def evomap(pset):
+        argd = dict(zip(list(pvals.keys()) + ['seed'], pset))
+        mig = argd.pop('mig')
+        migm = islandmat(argd['nd'], mig)
+        argd['migm'] = migm
+
+        pop, sampler, seed = evolve_pop(**argd)
+
+        # shape data to accumulate in DataFrame
+        argd.pop('migm')
+        data = np.array(sampler.data)
+        print('--> ran sim:', argd)
+
+        return {**argd,
+                'gen': data[:, 0].astype('int'),
+                'fst_n': data[:, 1],
+                'fst_s': data[:, 2]}
+
+    with Pool(args.cpus) as pool:
+        results = pool.map(evomap, psets)
+
+    data = pd.DataFrame(results)
+    if args.output:
+        data.to_hdf(args.output, 'fst_data', mode='w')
+
+    return data
 
 
 # Run main function
 if __name__ == "__main__":
-    main()
+    data = main()
